@@ -7,7 +7,11 @@ import (
 )
 
 func main() {
-	handler := modbus.NewTCPClientHandler("localhost:1502")
+	plan, err := ioutil.ReadFile(filename)
+	if err != nil{
+		log.Error(err)
+	}
+	handler := modbus.NewTCPClientHandler("localhost:502")
 	// Connect manually so that multiple requests are handled in one session
 	err := handler.Connect()
 	defer handler.Close()
