@@ -11,7 +11,7 @@ const (
 	ReadMultipleHoldingRegister uint16 = 3
 	ReadInputRegister           uint16 = 4
 	WriteSingleCoil             uint16 = 5
-	WriteMultipleCoils          uint16 = 6
-	WriteSingleRegister         uint16 = 7
-	WriteMultipleRegisters      uint16 = 8
+	WriteSingleRegister         uint16 = 6
+	WriteMultipleCoils          uint16 = 15
+	WriteMultipleRegisters      uint16 = 16
 )
