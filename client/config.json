@@ -15,19 +15,18 @@
       "devices":
       [
         {
-          "unitId":1,
-          "deviceName":"Thermostat",
+          "unitId":4,
+          "deviceName":"ATSENSE",
           "timeseries":
           [
             {
-              "tag":"Temp",
+              "tag":"TEMP4",
               "type":"long",
-              "pollPeriod":1,
-              "functionCode":1,
-              "address":1000,
+              "pollPeriod":6000,
+              "functionCode":4,
+              "address":2005,
               "registerCount":1,
               "bit":0
-              
             }
           ]
         }

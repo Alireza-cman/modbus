@@ -1,10 +1,12 @@
 package rtuclient
 
 import (
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/Atrovan/Modbus/client/mqtthandler"
 	"github.com/Atrovan/Modbus/client/variable"
 	"github.com/goburrow/modbus"
 	logging "github.com/op/go-logging"
@@ -18,6 +20,13 @@ var format = logging.MustStringFormatter(
 
 //ModbusManipulationRTU is dealing with RTU connection
 func ModbusManipulationRTU(configFile string) {
+	//
+	backend1 := logging.NewLogBackend(os.Stderr, "", 0)
+	backend2 := logging.NewLogBackend(os.Stderr, "", 0)
+	backend2Formatter := logging.NewBackendFormatter(backend2, format)
+	backend1Leveled := logging.AddModuleLevel(backend1)
+	backend1Leveled.SetLevel(logging.ERROR, "")
+	logging.SetBackend(backend1Leveled, backend2Formatter)
 
 	//
 	portName := gjson.Get(configFile, "transport.portName").Str
@@ -43,12 +52,12 @@ func ModbusManipulationRTU(configFile string) {
 	if portName == "" {
 		log.Error("You didn't indicate the portName in the config file")
 	}
-	log.Critical("stopBits", stopBits)
-	log.Critical("dataBits", dataBits)
-	log.Critical("Baudrate", baudRate)
-	log.Critical("parity", parity)
-	log.Critical("encoding", encoding)
-	log.Critical("portName", portName)
+	// log.Critical("stopBits", stopBits)
+	// log.Critical("dataBits", dataBits)
+	// log.Critical("Baudrate", baudRate)
+	// log.Critical("parity", parity)
+	// log.Critical("encoding", encoding)
+	// log.Critical("portName", portName)
 
 	handler := modbus.NewRTUClientHandler(portName)
 
@@ -67,7 +76,7 @@ func ModbusManipulationRTU(configFile string) {
 			unitId := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".unitId").Num
 			deviceName := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".deviceName").Str
 			telemetry := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".timeseries").Raw
-			go TelemetryHandlerRTU(telemetry, unitId, deviceName, handler)
+			go TelemetryHandlerRTU(portName, telemetry, uint16(unitId), deviceName, handler)
 
 		}
 	}
@@ -75,7 +84,9 @@ func ModbusManipulationRTU(configFile string) {
 	//
 }
 
-func TelemetryHandlerRTU(json string, unitId float64, deviceName string, handler *modbus.RTUClientHandler) {
+func TelemetryHandlerRTU(portname string, json string, unitId uint16, deviceName string, handler *modbus.RTUClientHandler) {
+	handler.SlaveId = byte(unitId)
+
 	telemetryNumber := gjson.Get(json, "#").Num
 	log.Warning("telemetry number of device ", deviceName, "is:", telemetryNumber)
 	for i := 0; i < int(telemetryNumber); i++ {
@@ -91,7 +102,7 @@ func TelemetryHandlerRTU(json string, unitId float64, deviceName string, handler
 		if count == 0 {
 			count = 2
 		}
-		go AtomRTU(tag, kind, uint16(functionCode), uint16(address), uint16(count), uint16(period), handler)
+		go AtomRTU(portname, tag, deviceName, kind, uint16(functionCode), uint16(address), uint16(count), uint16(period), handler)
 
 	}
 
@@ -102,69 +113,66 @@ func TelemetryHandlerRTU(json string, unitId float64, deviceName string, handler
 	//functionCode := gjson.Get(json, "0")
 }
 
-func AtomRTU(tag string, kind string, functionCode uint16, address uint16, count uint16, period uint16, handler *modbus.RTUClientHandler) {
-	err := handler.Connect()
+func AtomRTU(portname string, tag string, deviceName string, kind string, functionCode uint16, address uint16, count uint16, period uint16, handler *modbus.RTUClientHandler) {
+
+	localhandler := modbus.NewRTUClientHandler(portname)
+	localhandler.Parity = handler.Parity
+	localhandler.IdleTimeout = handler.IdleTimeout
+	localhandler.StopBits = handler.StopBits
+	localhandler.DataBits = handler.DataBits
+	localhandler.BaudRate = handler.BaudRate
+	localhandler.SlaveId = handler.SlaveId
+
+	err := localhandler.Connect()
 	if err != nil {
 		log.Error(err)
 	}
-	log.Critical(address)
-	log.Critical(count)
-	log.Critical(functionCode)
-	client := modbus.NewClient(handler)
-	//log.Critical(client)
+	client := modbus.NewClient(localhandler)
 	switch functionCode {
 	case variable.ReadCoil: //read coil
 		for {
 			results, err := client.ReadCoils(uint16(address), count)
-			if results[0] == byte(0) {
-				_, err = client.WriteSingleCoil(address, uint16(65280))
-
-			} else {
-				_, err = client.WriteSingleCoil(address, uint16(0))
-			}
+			log.Warning(results)
+			mqtthandler.SendMQTTMessage(tag, deviceName, results)
 			if err != nil {
 				log.Error(err)
-			} else {
-				log.Info("ReadCoil of ", tag, " is ", results)
 			}
-
-			time.Sleep(time.Duration(period) * time.Second)
+			time.Sleep(time.Duration(period) * time.Millisecond)
 		}
 	case variable.ReadDiscreteInput:
 		for {
 			results, err := client.ReadDiscreteInputs(uint16(address), uint16(count))
 			if err != nil {
-				log.Error("ReadDiscreteInput of ", tag, " is ", results)
 				log.Error(err)
 			} else {
 				log.Info("ReadDiscreteInput of ", tag, " is ", results)
 			}
-			time.Sleep(time.Duration(period) * time.Second)
+			time.Sleep(time.Duration(period) * time.Millisecond)
 		}
 	case variable.ReadMultipleHoldingRegister:
 		for {
 			results, err := client.ReadHoldingRegisters(uint16(address), uint16(count))
 			if err != nil {
-				log.Error("ReadDiscreteInput of ", tag, " is ", results)
 				log.Error(err)
 			} else {
 				log.Notice("ReadMultipleHoldingRegister of ", tag, " is ", results)
 
 			}
-			time.Sleep(time.Duration(period) * time.Second)
+			time.Sleep(time.Duration(period) * time.Millisecond)
 
 		}
 	case variable.ReadInputRegister:
 		for {
 			results, err := client.ReadInputRegisters(uint16(address), uint16(count))
 			if err != nil {
-				log.Error("ReadDiscreteInput of ", tag, " is ", results)
+
 				log.Error(err)
 			} else {
 				log.Info("ReadInputRegister of ", tag, " is ", results)
+				mqtthandler.SendMQTTMessage(tag, deviceName, results)
 			}
 
-			time.Sleep(time.Duration(period) * time.Second)
+			time.Sleep(time.Duration(period) * time.Millisecond)
 		}
 	default:
 		log.Error(functionCode)
