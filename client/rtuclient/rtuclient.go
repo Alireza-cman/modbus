@@ -67,28 +67,32 @@ func ModbusManipulationRTU(configFile string) {
 	handler.StopBits = int(stopBits)
 	handler.DataBits = int(dataBits)
 	handler.SlaveId = 1
-
+	var wgg sync.WaitGroup
 	deviceNumber := gjson.Get(configFile, "devices.#").Num
-
+	var mut sync.Mutex
 	if encoding == "rtu" {
 		log.Warning("trying to make a RTU modbus connection,", portName)
 		for i := 0; i < int(deviceNumber); i++ {
 			unitId := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".unitId").Num
 			deviceName := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".deviceName").Str
 			telemetry := gjson.Get(configFile, "devices."+strconv.Itoa(i)+".timeseries").Raw
-			go TelemetryHandlerRTU(portName, telemetry, uint16(unitId), deviceName, handler)
+			wgg.Add(1)
+			go TelemetryHandlerRTU(portName, telemetry, uint16(unitId), deviceName, handler, &mut)
 
 		}
+		wgg.Wait()
 	}
 
 	//
 }
 
-func TelemetryHandlerRTU(portname string, json string, unitId uint16, deviceName string, handler *modbus.RTUClientHandler) {
+func TelemetryHandlerRTU(portname string, json string, unitId uint16, deviceName string, handler *modbus.RTUClientHandler, mut *sync.Mutex) {
 	handler.SlaveId = byte(unitId)
 
 	telemetryNumber := gjson.Get(json, "#").Num
 	log.Warning("telemetry number of device ", deviceName, "is:", telemetryNumber)
+	//var wgg sync.WaitGroup
+	//var mut sync.Mutex
 	for i := 0; i < int(telemetryNumber); i++ {
 		tag := gjson.Get(json, strconv.Itoa(i)+".tag").Str
 		kind := gjson.Get(json, strconv.Itoa(i)+".kind").Str
@@ -102,18 +106,19 @@ func TelemetryHandlerRTU(portname string, json string, unitId uint16, deviceName
 		if count == 0 {
 			count = 2
 		}
-		go AtomRTU(portname, tag, deviceName, kind, uint16(functionCode), uint16(address), uint16(count), uint16(period), handler)
+
+		go AtomRTU(portname, tag, deviceName, kind, uint16(functionCode), uint16(address), uint16(count), uint16(period), handler, mut)
 
 	}
 
-	var wg sync.WaitGroup
+	// var wg sync.WaitGroup
 
-	wg.Add(1)
-	wg.Wait()
+	// wg.Add(1)
+	// wg.Wait()
 	//functionCode := gjson.Get(json, "0")
 }
 
-func AtomRTU(portname string, tag string, deviceName string, kind string, functionCode uint16, address uint16, count uint16, period uint16, handler *modbus.RTUClientHandler) {
+func AtomRTU(portname string, tag string, deviceName string, kind string, functionCode uint16, address uint16, count uint16, period uint16, handler *modbus.RTUClientHandler, mut *sync.Mutex) {
 
 	localhandler := modbus.NewRTUClientHandler(portname)
 	localhandler.Parity = handler.Parity
@@ -131,7 +136,9 @@ func AtomRTU(portname string, tag string, deviceName string, kind string, functi
 	switch functionCode {
 	case variable.ReadCoil: //read coil
 		for {
+			mut.Lock()
 			results, err := client.ReadCoils(uint16(address), count)
+			mut.Unlock()
 			log.Warning(results)
 			mqtthandler.SendMQTTMessage(tag, deviceName, results)
 			if err != nil {
@@ -151,7 +158,9 @@ func AtomRTU(portname string, tag string, deviceName string, kind string, functi
 		}
 	case variable.ReadMultipleHoldingRegister:
 		for {
+			mut.Lock()
 			results, err := client.ReadHoldingRegisters(uint16(address), uint16(count))
+			mut.Unlock()
 			if err != nil {
 				log.Error(err)
 			} else {
@@ -163,9 +172,11 @@ func AtomRTU(portname string, tag string, deviceName string, kind string, functi
 		}
 	case variable.ReadInputRegister:
 		for {
+			mut.Lock()
 			results, err := client.ReadInputRegisters(uint16(address), uint16(count))
+			mut.Unlock()
+			//wgg.Done()
 			if err != nil {
-
 				log.Error(err)
 			} else {
 				log.Info("ReadInputRegister of ", tag, " is ", results)
